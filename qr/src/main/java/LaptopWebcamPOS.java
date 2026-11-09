@@ -51,34 +51,34 @@ import java.util.Map;
 
 public class LaptopWebcamPOS {
 
-    // ================== SETTINGS (dito mo palitan ang detalye ng tindahan) ==================
+    // ================== SETTINGS (change your store details here) ==================
     private static final String STORE_NAME = "SIR JOEY STORE";
     private static final String STORE_ADDRESS = "Davao City, Philippines";
     private static final String EMPLOYEE = "Nilben";
     private static final String POS_NAME = "POS 1";
-    private static final String PAYMENT_LABEL = "Cash";   // lalabas sa resibo bago ang halaga ng bayad
+    private static final String PAYMENT_LABEL = "Cash";   // shown on the receipt before the amount paid (e.g. "Cash" or "GCash / QR Pay")
     private static final int RECEIPT_WIDTH = 32;      // 58mm printer = 32, 80mm printer = 48
-    private static final String PRINTER_NAME = "";    // blanko = default printer
-    // false = normal na pag-print (gumagana sa PDF printer at sa karamihan ng thermal driver)
-    // true  = raw ESC/POS bytes (para lang sa totoong thermal printer na tumatanggap nito)
-    private static final boolean USE_RAW_ESCPOS = false;
-    // true = lalabas ang Windows print dialog para mapili mo ang printer (mainam habang nagte-test)
+    private static final String PRINTER_NAME = "POS-58";   // part of the name is enough (case-insensitive). Empty = default printer
+    // false = normal printing (works with PDF printers and most thermal drivers)
+    // true  = raw ESC/POS bytes (only for real thermal printers that accept them)
+    private static final boolean USE_RAW_ESCPOS = true;
+    // true = shows the Windows print dialog so you can pick the printer (handy while testing)
     private static final boolean SHOW_PRINT_DIALOG = true;
 
-    // ================== LISTAHAN NG PRODUKTO ==================
-    // Ang key ang dapat nakasulat sa loob ng QR (hindi sensitibo sa laki ng letra).
+    // ================== PRODUCT LIST ==================
+    // The key is what must be written inside the QR code (case-insensitive).
     static class Product {
         final String name;
         final double price;
         Product(String name, double price) { this.name = name; this.price = price; }
     }
 
-    // Ang listahan ay binabasa mula sa products.csv (nasa folder kung saan tumatakbo ang program).
-    // Format bawat linya:  code,pangalan,presyo     hal.  SARDINAS,Sardinas 155g,30.00
+    // The list is read from products.csv (in the folder where the program runs).
+    // Format per line:  code,name,price     e.g.  SARDINAS,Sardinas 155g,30.00
     private static final String PRODUCTS_FILE = "products.csv";
     private static final Map<String, Product> CATALOG = new LinkedHashMap<>();
 
-    // ================== KULAY ==================
+    // ================== COLORS ==================
     private static final Color NAVY = new Color(0x1F2A44);
     private static final Color GREEN = new Color(0x2E9E5B);
     private static final Color BLUE = new Color(0x2563EB);
@@ -117,7 +117,7 @@ public class LaptopWebcamPOS {
         String loadMsg = loadProducts();
         frame = new JFrame(STORE_NAME + " - POS");
         frame.setSize(1280, 790);
-        frame.setExtendedState(JFrame.MAXIMIZED_BOTH);   // sakto sa screen, hindi maputol ang ibaba
+        frame.setExtendedState(JFrame.MAXIMIZED_BOTH);   // fit the screen so the bottom is not cut off
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.setLayout(new BorderLayout());
 
@@ -133,20 +133,20 @@ public class LaptopWebcamPOS {
         statusLabel.setOpaque(true);
         statusLabel.setFont(new Font("Segoe UI", Font.BOLD, 15));
         statusLabel.setBorder(new EmptyBorder(9, 10, 9, 10));
-        setStatus(loadMsg, loadMsg.startsWith("Na-load") ? GRAY : RED);
+        setStatus(loadMsg, loadMsg.startsWith("Loaded") ? GRAY : RED);
 
         JPanel top = new JPanel(new GridLayout(2, 1));
         top.add(title);
         top.add(statusLabel);
         frame.add(top, BorderLayout.NORTH);
 
-        // Kaliwa: camera
+        // Left: camera
         webcamContainer = new JPanel(new BorderLayout());
         webcamContainer.setBackground(Color.BLACK);
         showPlaceholder();
 
-        // Kanan: cart table
-        tableModel = new DefaultTableModel(new String[]{"Item", "Presyo", "Qty", "Subtotal"}, 0) {
+        // Right: cart table
+        tableModel = new DefaultTableModel(new String[]{"Item", "Price", "Qty", "Subtotal"}, 0) {
             @Override public boolean isCellEditable(int r, int c) { return false; }
         };
         JTable table = new JTable(tableModel);
@@ -160,8 +160,8 @@ public class LaptopWebcamPOS {
         for (int c = 1; c <= 3; c++) table.getColumnModel().getColumn(c).setCellRenderer(right);
         table.getColumnModel().getColumn(0).setPreferredWidth(200);
 
-        JButton undoButton = makeButton("Alisin ang huli", GRAY, 14);
-        JButton clearButton = makeButton("Bago (I-clear)", GRAY, 14);
+        JButton undoButton = makeButton("Remove last item", GRAY, 14);
+        JButton clearButton = makeButton("New sale (Clear)", GRAY, 14);
         undoButton.addActionListener(e -> { removeLastItem(); refreshCart(); });
         clearButton.addActionListener(e -> newTransaction());
         JPanel tools = new JPanel(new GridLayout(1, 2, 10, 0));
@@ -176,11 +176,11 @@ public class LaptopWebcamPOS {
         center.setBorder(new EmptyBorder(16, 16, 8, 16));
         center.add(webcamContainer);
         center.add(rightPanel);
-        JPanel salesPage = new JPanel(new BorderLayout());   // unang tab: Benta
+        JPanel salesPage = new JPanel(new BorderLayout());   // first tab: Sales
         salesPage.add(center, BorderLayout.CENTER);
 
-        // Ibaba: malaking total + buttons
-        JLabel caption = new JLabel("KABUUAN");
+        // Bottom: big total + buttons
+        JLabel caption = new JLabel("TOTAL");
         caption.setFont(new Font("Segoe UI", Font.BOLD, 14));
         caption.setForeground(GRAY);
         totalLabel = new JLabel("₱0.00");
@@ -190,8 +190,8 @@ public class LaptopWebcamPOS {
         totalBox.add(caption);
         totalBox.add(totalLabel);
 
-        startButton = makeButton("Simulan ang Pag-scan", GREEN, 16);
-        JButton printButton = makeButton("I-print ang Resibo", BLUE, 16);
+        startButton = makeButton("Start Scanning", GREEN, 16);
+        JButton printButton = makeButton("Print Receipt", BLUE, 16);
         startButton.addActionListener(e -> toggleScanner());
         printButton.addActionListener(e -> printReceiptAction());
         JPanel actions = new JPanel(new GridLayout(1, 2, 12, 0));
@@ -199,11 +199,11 @@ public class LaptopWebcamPOS {
         actions.add(startButton);
         actions.add(printButton);
 
-        // Bayad ng customer at sukli
-        JLabel payCaption = new JLabel("BAYAD NG CUSTOMER (₱)");
+        // Customer payment and change
+        JLabel payCaption = new JLabel("CUSTOMER PAYMENT (₱)");
         payCaption.setFont(new Font("Segoe UI", Font.BOLD, 14));
         payCaption.setForeground(GRAY);
-        JLabel changeCaption = new JLabel("SUKLI");
+        JLabel changeCaption = new JLabel("CHANGE");
         changeCaption.setFont(new Font("Segoe UI", Font.BOLD, 14));
         changeCaption.setForeground(GRAY);
 
@@ -216,7 +216,7 @@ public class LaptopWebcamPOS {
             @Override public void removeUpdate(DocumentEvent e) { updateChange(); }
             @Override public void changedUpdate(DocumentEvent e) { updateChange(); }
         });
-        paymentField.addActionListener(e -> printReceiptAction());   // Enter = i-print
+        paymentField.addActionListener(e -> printReceiptAction());   // Enter = print
 
         changeLabel = new JLabel("₱0.00");
         changeLabel.setFont(new Font("Segoe UI", Font.BOLD, 30));
@@ -229,7 +229,7 @@ public class LaptopWebcamPOS {
         payGrid.add(changeLabel);
 
         JPanel quick = new JPanel(new GridLayout(1, 4, 6, 0));
-        quick.add(quickButton("Eksakto", -1));
+        quick.add(quickButton("Exact", -1));
         for (int amt : new int[]{100, 500, 1000}) quick.add(quickButton("₱" + amt, amt));
 
         JPanel paymentPanel = new JPanel(new BorderLayout(0, 6));
@@ -245,8 +245,8 @@ public class LaptopWebcamPOS {
 
         JTabbedPane tabs = new JTabbedPane();
         tabs.setFont(new Font("Segoe UI", Font.BOLD, 15));
-        tabs.addTab("   Benta   ", salesPage);
-        tabs.addTab("   Produkto at QR   ", buildProductsPage());
+        tabs.addTab("   Sales   ", salesPage);
+        tabs.addTab("   Products & QR   ", buildProductsPage());
         frame.add(tabs, BorderLayout.CENTER);
 
         frame.setLocationRelativeTo(null);
@@ -264,7 +264,7 @@ public class LaptopWebcamPOS {
 
     private static void showPlaceholder() {
         webcamContainer.removeAll();
-        JLabel l = new JLabel("Naka-off ang camera", SwingConstants.CENTER);
+        JLabel l = new JLabel("Camera is off", SwingConstants.CENTER);
         l.setForeground(Color.WHITE);
         l.setFont(new Font("Segoe UI", Font.PLAIN, 16));
         webcamContainer.add(l, BorderLayout.CENTER);
@@ -285,14 +285,14 @@ public class LaptopWebcamPOS {
 
     private static void startScanner() {
         startButton.setEnabled(false);
-        setStatus("Binubuksan ang camera...", GRAY);
+        setStatus("Opening camera...", GRAY);
 
         new Thread(() -> {
             try {
                 webcam = Webcam.getDefault();
                 if (webcam == null) {
                     SwingUtilities.invokeLater(() -> {
-                        setStatus("Error: Walang nakitang webcam!", RED);
+                        setStatus("Error: No webcam found!", RED);
                         startButton.setEnabled(true);
                     });
                     return;
@@ -307,10 +307,10 @@ public class LaptopWebcamPOS {
                     webcamContainer.add(webcamPanel, BorderLayout.CENTER);
                     webcamContainer.revalidate();
                     webcamContainer.repaint();
-                    startButton.setText("Ihinto ang Pag-scan");
+                    startButton.setText("Stop Scanning");
                     startButton.setBackground(RED);
                     startButton.setEnabled(true);
-                    setStatus("Handa na. Itapat ang QR sa camera.", GREEN);
+                    setStatus("Ready. Hold a QR code up to the camera.", GREEN);
                 });
 
                 while (isScanning) {
@@ -319,7 +319,7 @@ public class LaptopWebcamPOS {
                     if (text != null) {
                         final String code = text.trim();
                         SwingUtilities.invokeLater(() -> handleScan(code));
-                        Thread.sleep(1500);   // pahinga para hindi madoble ang scan
+                        Thread.sleep(1500);   // pause so the same scan is not counted twice
                     } else {
                         Thread.sleep(120);
                     }
@@ -328,8 +328,8 @@ public class LaptopWebcamPOS {
                 final String msg = ex.getMessage();
                 isScanning = false;
                 SwingUtilities.invokeLater(() -> {
-                    setStatus("Error sa Camera: " + msg, RED);
-                    startButton.setText("Simulan ang Pag-scan");
+                    setStatus("Camera error: " + msg, RED);
+                    startButton.setText("Start Scanning");
                     startButton.setBackground(GREEN);
                     startButton.setEnabled(true);
                 });
@@ -344,9 +344,9 @@ public class LaptopWebcamPOS {
             if (webcam != null && webcam.isOpen()) webcam.close();
         } catch (Exception ignored) { }
         showPlaceholder();
-        startButton.setText("Simulan ang Pag-scan");
+        startButton.setText("Start Scanning");
         startButton.setBackground(GREEN);
-        setStatus("Naka-pause ang scanner", GRAY);
+        setStatus("Scanner paused", GRAY);
     }
 
     private static String decodeQRCode(BufferedImage image) {
@@ -369,7 +369,7 @@ public class LaptopWebcamPOS {
         if (p == null) {
             Toolkit.getDefaultToolkit().beep();
             String shown = raw.length() > 30 ? raw.substring(0, 30) + "..." : raw;
-            setStatus("Hindi produkto ng tindahan ang QR na ito: " + shown, RED);
+            setStatus("Not a product QR code: " + shown, RED);
             return;
         }
         Toolkit.getDefaultToolkit().beep();
@@ -377,7 +377,7 @@ public class LaptopWebcamPOS {
         cart.put(key, qty == null ? 1 : qty + 1);
         lastCode = key;
         refreshCart();
-        setStatus("Na-scan: " + p.name + "  (₱" + String.format("%.2f", p.price) + ")", GREEN);
+        setStatus("Scanned: " + p.name + "  (₱" + String.format("%.2f", p.price) + ")", GREEN);
     }
 
     private static void removeLastItem() {
@@ -423,9 +423,9 @@ public class LaptopWebcamPOS {
         refreshCart();
     }
 
-    // ================== TAB: PRODUKTO AT QR ==================
+    // ================== TAB: PRODUCTS & QR ==================
     private static JPanel buildProductsPage() {
-        productsModel = new DefaultTableModel(new String[]{"Code (nasa QR)", "Pangalan", "Presyo"}, 0) {
+        productsModel = new DefaultTableModel(new String[]{"Code (in QR)", "Name", "Price"}, 0) {
             @Override public boolean isCellEditable(int r, int c) { return false; }
         };
         JTable t = new JTable(productsModel);
@@ -439,22 +439,22 @@ public class LaptopWebcamPOS {
         t.getColumnModel().getColumn(2).setCellRenderer(rightAlign);
         t.getColumnModel().getColumn(1).setPreferredWidth(300);
 
-        JLabel info = new JLabel("<html>Galing ang listahang ito sa <b>products.csv</b>. "
-                + "I-edit ang file (Excel o Notepad), <b>i-save at isara</b>, tapos pindutin ang "
-                + "<b>I-reload</b>. Ang <b>Gumawa ng QR</b> ay gagawa ng larawan para sa lahat ng produkto.</html>");
+        JLabel info = new JLabel("<html>This list comes from <b>products.csv</b>. "
+                + "Edit the file (Excel or Notepad), <b>save and close it</b>, then press "
+                + "<b>Reload products</b>. <b>Generate product QR codes</b> creates an image for every product.</html>");
         info.setFont(new Font("Segoe UI", Font.PLAIN, 14));
         info.setForeground(GRAY);
 
-        JButton reload = makeButton("I-reload ang produkto", BLUE, 15);
-        JButton qr = makeButton("Gumawa ng QR ng produkto", GREEN, 15);
-        JButton openCsv = makeButton("Buksan ang products.csv", GRAY, 15);
-        JButton openQr = makeButton("Buksan ang folder ng QR", GRAY, 15);
+        JButton reload = makeButton("Reload products", BLUE, 15);
+        JButton qr = makeButton("Generate product QR codes", GREEN, 15);
+        JButton openCsv = makeButton("Open products.csv", GRAY, 15);
+        JButton openQr = makeButton("Open QR folder", GRAY, 15);
         reload.addActionListener(e -> reloadProducts());
         qr.addActionListener(e -> generateQrAction());
         openCsv.addActionListener(e -> openInDesktop(Paths.get(PRODUCTS_FILE).toAbsolutePath(),
-                "Wala pang products.csv"));
+                "products.csv does not exist yet"));
         openQr.addActionListener(e -> openInDesktop(Paths.get("qr_codes").toAbsolutePath(),
-                "Wala pang folder ng QR. Pindutin muna ang 'Gumawa ng QR ng produkto'"));
+                "The QR folder does not exist yet. Press 'Generate product QR codes'"));
 
         JPanel buttons = new JPanel(new GridLayout(2, 2, 12, 12));
         buttons.setPreferredSize(new Dimension(100, 130));
@@ -490,13 +490,13 @@ public class LaptopWebcamPOS {
         try {
             if (Desktop.isDesktopSupported()) Desktop.getDesktop().open(path.toFile());
         } catch (Exception ex) {
-            setStatus("Hindi mabuksan: " + ex.getMessage(), RED);
+            setStatus("Could not open: " + ex.getMessage(), RED);
         }
     }
 
     // ================== PRODUCTS.CSV ==================
-    // Binabasa ang products.csv at pinapalitan ang laman ng CATALOG.
-    // Kapag wala pang file, gagawa ito ng sample. Ibinabalik ang mensaheng ipapakita sa status bar.
+    // Reads products.csv and replaces the contents of CATALOG.
+    // If the file does not exist yet, a sample is created. Returns the message shown in the status bar.
     private static String loadProducts() {
         Path path = Paths.get(PRODUCTS_FILE).toAbsolutePath();
         try {
@@ -519,13 +519,13 @@ public class LaptopWebcamPOS {
                 String line = raw.replace("\uFEFF", "").trim();
                 if (line.isEmpty() || line.startsWith("#")) continue;
 
-                char delim = line.indexOf(';') >= 0 ? ';' : ',';   // Excel sa ibang rehiyon ay gumagamit ng ;
+                char delim = line.indexOf(';') >= 0 ? ';' : ',';   // Excel in some regions uses ;
                 List<String> cols = splitCsv(line, delim);
                 if (cols.size() < 3) { skipped++; continue; }
 
                 String code = cols.get(0).trim().toUpperCase();
                 String name = cols.get(1).trim();
-                if (code.equals("CODE")) continue;                  // header na linya
+                if (code.equals("CODE")) continue;                  // header line
 
                 String priceText = cols.get(2).replace("₱", "").replace("PHP", "").replace("php", "").trim();
                 priceText = (delim == ';') ? priceText.replace(',', '.') : priceText.replace(",", "");
@@ -539,28 +539,28 @@ public class LaptopWebcamPOS {
             }
 
             if (loaded.isEmpty()) {
-                return "Walang wastong produkto sa " + path + " (hindi nabago ang listahan)";
+                return "No valid products in " + path + " (product list unchanged)";
             }
             CATALOG.clear();
             CATALOG.putAll(loaded);
             refreshProductsTable();
-            return "Na-load ang " + loaded.size() + " produkto mula sa " + path
-                    + (skipped > 0 ? "  |  " + skipped + " linya ang nilaktawan (mali ang format)" : "");
+            return "Loaded " + loaded.size() + " products from " + path
+                    + (skipped > 0 ? "  |  " + skipped + " line(s) skipped (invalid format)" : "");
         } catch (IOException ex) {
-            return "Hindi mabasa ang " + path + ": " + ex.getMessage();
+            return "Could not read " + path + ": " + ex.getMessage();
         }
     }
 
-    // Para sa button na "I-reload ang produkto": walang kailangang i-restart.
+    // For the "Reload products" button: no restart needed.
     private static void reloadProducts() {
         String msg = loadProducts();
-        cart.keySet().retainAll(CATALOG.keySet());   // alisin sa cart ang code na wala na sa listahan
+        cart.keySet().retainAll(CATALOG.keySet());   // remove cart items whose code is no longer in the list
         if (lastCode != null && !CATALOG.containsKey(lastCode)) lastCode = null;
-        refreshCart();                               // awtomatikong magagamit ang bagong presyo
-        setStatus(msg, msg.startsWith("Na-load") ? GREEN : RED);
+        refreshCart();                               // new prices are picked up automatically
+        setStatus(msg, msg.startsWith("Loaded") ? GREEN : RED);
     }
 
-    // Simpleng CSV splitter na kayang magbasa ng "may, kuwit" sa loob ng panipi.
+    // Simple CSV splitter that can read "values, with commas" inside quotes.
     private static List<String> splitCsv(String line, char delim) {
         List<String> out = new ArrayList<>();
         StringBuilder cur = new StringBuilder();
@@ -585,15 +585,15 @@ public class LaptopWebcamPOS {
         return out;
     }
 
-    // ================== GUMAWA NG QR NG PRODUKTO ==================
-    // Gumagawa ng qr_<CODE>.png kada produkto at QR_sheet_N.png (12 kada pahina) sa folder na "qr_codes".
+    // ================== GENERATE PRODUCT QR CODES ==================
+    // Creates qr_<CODE>.png per product and QR_sheet_N.png (12 per page) in the "qr_codes" folder.
     private static void generateQrAction() {
-        reloadProducts();   // siguraduhing pinakabago ang products.csv
+        reloadProducts();   // make sure products.csv is up to date
         if (CATALOG.isEmpty()) {
-            setStatus("Walang produkto na magagawan ng QR", RED);
+            setStatus("No products to generate QR codes for", RED);
             return;
         }
-        setStatus("Gumagawa ng QR...", GRAY);
+        setStatus("Generating QR codes...", GRAY);
         final Map<String, Product> snapshot = new LinkedHashMap<>(CATALOG);
 
         new Thread(() -> {
@@ -611,7 +611,7 @@ public class LaptopWebcamPOS {
                 int sheets = writeQrSheets(cards, dir);
 
                 final Path outDir = dir;
-                final String msg = "Nagawa ang " + cards.size() + " QR at " + sheets + " sheet sa " + dir;
+                final String msg = "Generated " + cards.size() + " QR codes and " + sheets + " sheet(s) in " + dir;
                 SwingUtilities.invokeLater(() -> {
                     setStatus(msg, GREEN);
                     try {
@@ -620,12 +620,12 @@ public class LaptopWebcamPOS {
                 });
             } catch (Exception ex) {
                 final String err = ex.getMessage();
-                SwingUtilities.invokeLater(() -> setStatus("Hindi nakagawa ng QR: " + err, RED));
+                SwingUtilities.invokeLater(() -> setStatus("Could not generate QR codes: " + err, RED));
             }
         }, "qr-generator").start();
     }
 
-    // Isang card: QR + pangalan + presyo + code
+    // One card: QR + name + price + code
     private static BufferedImage makeQrCard(String code, Product p) throws Exception {
         final int w = 440, h = 560, qr = 360;
 
@@ -652,7 +652,7 @@ public class LaptopWebcamPOS {
         return card;
     }
 
-    // Isusulat ang text sa gitna; liliitan ang letra kung masyadong mahaba
+    // Draws the text centered; shrinks the font if it is too long
     private static void drawCentered(Graphics2D g, String text, Font font, Color color, int width, int baselineY) {
         Font f = font;
         FontMetrics fm = g.getFontMetrics(f);
@@ -665,7 +665,7 @@ public class LaptopWebcamPOS {
         g.drawString(text, (width - fm.stringWidth(text)) / 2, baselineY);
     }
 
-    // Pinagsasama ang mga card sa printable na pahina: 3 column, 12 card kada pahina
+    // Combines the cards into printable pages: 3 columns, 12 cards per page
     private static int writeQrSheets(List<BufferedImage> cards, Path dir) throws IOException {
         final int cols = 3, perSheet = 12, pad = 30;
         int cw = cards.get(0).getWidth();
@@ -692,12 +692,12 @@ public class LaptopWebcamPOS {
         return sheets;
     }
 
-    // ================== BAYAD AT SUKLI ==================
+    // ================== PAYMENT AND CHANGE ==================
     private static double round2(double v) {
         return Math.round(v * 100.0) / 100.0;
     }
 
-    // Tumatanggap ng "500", "1,000.50", "₱200". Ibinabalik ang null kung blanko o mali.
+    // Accepts "500", "1,000.50", "₱200". Returns null if empty or invalid.
     private static Double parseMoney(String s) {
         if (s == null) return null;
         String clean = s.replace("₱", "").replace(",", "").trim();
@@ -723,12 +723,12 @@ public class LaptopWebcamPOS {
             changeLabel.setText(String.format("₱%.2f", diff));
             changeLabel.setForeground(GREEN);
         } else {
-            changeLabel.setText(String.format("Kulang ₱%.2f", -diff));
+            changeLabel.setText(String.format("Short ₱%.2f", -diff));
             changeLabel.setForeground(RED);
         }
     }
 
-    // amount < 0 = "Eksakto" (isusulat ang eksaktong kabuuan)
+    // amount < 0 = "Exact" (fills in the exact total)
     private static JButton quickButton(String text, int amount) {
         JButton b = makeButton(text, GRAY, 13);
         b.addActionListener(e -> {
@@ -738,7 +738,7 @@ public class LaptopWebcamPOS {
         return b;
     }
 
-    // ================== RESIBO ==================
+    // ================== RECEIPT ==================
     private static String repeat(char c, int n) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < n; i++) sb.append(c);
@@ -780,11 +780,11 @@ public class LaptopWebcamPOS {
         sb.append(dash);
         sb.append(line("Total", "P" + String.format("%.2f", total())));
         sb.append(line(PAYMENT_LABEL, "P" + String.format("%.2f", tendered)));
-        sb.append(line("Sukli", "P" + String.format("%.2f", round2(tendered - total()))));
+        sb.append(line("Change", "P" + String.format("%.2f", round2(tendered - total()))));
         sb.append(dash);
         sb.append(center("Thank you for shopping at"));
         sb.append(center(STORE_NAME + "!"));
-        sb.append(center("Salamat at Mabuhay!"));
+        sb.append(center("Please come again!"));
         sb.append("\n");
         sb.append(line(LocalDateTime.now().format(df), String.format("#1-%04d", receiptNo)));
         return sb.toString();
@@ -792,25 +792,25 @@ public class LaptopWebcamPOS {
 
     private static void printReceiptAction() {
         if (cart.isEmpty()) {
-            JOptionPane.showMessageDialog(frame, "Walang laman ang cart para ma-print!",
-                    "Babala", JOptionPane.WARNING_MESSAGE);
+            JOptionPane.showMessageDialog(frame, "The cart is empty, nothing to print!",
+                    "Warning", JOptionPane.WARNING_MESSAGE);
             return;
         }
         String payText = paymentField.getText().trim();
         Double paid = parseMoney(payText);
         if (paid == null) {
             String msg = payText.isEmpty()
-                    ? "Ilagay muna ang bayad ng customer."
-                    : "Hindi wastong halaga ang nakasulat sa bayad: " + payText;
-            JOptionPane.showMessageDialog(frame, msg, "Babala", JOptionPane.WARNING_MESSAGE);
+                    ? "Please enter the customer's payment."
+                    : "Invalid payment amount: " + payText;
+            JOptionPane.showMessageDialog(frame, msg, "Warning", JOptionPane.WARNING_MESSAGE);
             paymentField.requestFocus();
             return;
         }
         double due = round2(total());
         if (paid < due) {
             JOptionPane.showMessageDialog(frame,
-                    String.format("Kulang ang bayad. Kulang pa ng ₱%.2f", due - paid),
-                    "Kulang ang Bayad", JOptionPane.WARNING_MESSAGE);
+                    String.format("Payment is not enough. Still short by ₱%.2f", due - paid),
+                    "Insufficient Payment", JOptionPane.WARNING_MESSAGE);
             paymentField.requestFocus();
             return;
         }
@@ -823,24 +823,24 @@ public class LaptopWebcamPOS {
         JScrollPane sp = new JScrollPane(preview);
         sp.setPreferredSize(new Dimension(400, 460));
 
-        int choice = JOptionPane.showOptionDialog(frame, sp, "Preview ng Resibo",
+        int choice = JOptionPane.showOptionDialog(frame, sp, "Receipt Preview",
                 JOptionPane.YES_NO_OPTION, JOptionPane.PLAIN_MESSAGE, null,
-                new Object[]{"I-print", "Kanselahin"}, "I-print");
+                new Object[]{"Print", "Cancel"}, "Print");
         if (choice != 0) return;
 
         try {
-            if (!doPrint(receipt)) return;   // kinansela ang print dialog, hindi buburahin ang cart
+            if (!doPrint(receipt)) return;   // print dialog was cancelled, keep the cart
             receiptNo++;
             newTransaction();
-            setStatus(String.format("Sukli: ₱%.2f  |  Naipadala sa printer. Handa na sa susunod na customer.", change), GREEN);
+            setStatus(String.format("Change: ₱%.2f  |  Sent to printer. Ready for the next customer.", change), GREEN);
         } catch (Exception ex) {
-            JOptionPane.showMessageDialog(frame, "Hindi makapag-print: " + ex.getMessage(),
-                    "Error sa Printer", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(frame, "Could not print: " + ex.getMessage(),
+                    "Printer Error", JOptionPane.ERROR_MESSAGE);
         }
     }
 
     // ================== PRINT (normal / graphic) ==================
-    // Ibinabalik ang false kung kinansela ng user ang print dialog.
+    // Returns false if the user cancelled the print dialog.
     private static boolean doPrint(String text) throws Exception {
         if (USE_RAW_ESCPOS) {
             printThermal(text);
@@ -854,15 +854,15 @@ public class LaptopWebcamPOS {
 
         if (!PRINTER_NAME.trim().isEmpty()) {
             for (PrintService s : PrintServiceLookup.lookupPrintServices(null, null)) {
-                if (s.getName().equalsIgnoreCase(PRINTER_NAME)) job.setPrintService(s);
+                if (s.getName().toLowerCase().contains(PRINTER_NAME.trim().toLowerCase())) job.setPrintService(s);
             }
         }
         if (SHOW_PRINT_DIALOG && !job.printDialog()) return false;
 
         final String[] lines = text.split("\n", -1);
-        job.setJobName("Resibo");
+        job.setJobName("Receipt");
         job.setPrintable((g, pf, pageIndex) -> {
-            // laki ng letra: kasya ang buong lapad ng resibo sa papel (max 11pt)
+            // font size: fit the full receipt width on the paper (max 11pt)
             float size = (float) Math.min(11.0, pf.getImageableWidth() / (RECEIPT_WIDTH * 0.6));
             Font font = new Font(Font.MONOSPACED, Font.PLAIN, 10).deriveFont(size);
             FontMetrics fm = g.getFontMetrics(font);
@@ -893,16 +893,23 @@ public class LaptopWebcamPOS {
             ps = PrintServiceLookup.lookupDefaultPrintService();
         } else {
             for (PrintService s : PrintServiceLookup.lookupPrintServices(null, null)) {
-                if (s.getName().equalsIgnoreCase(PRINTER_NAME)) ps = s;
+                if (s.getName().toLowerCase().contains(PRINTER_NAME.trim().toLowerCase())) ps = s;
             }
         }
-        if (ps == null) throw new IllegalStateException("Walang nakitang printer");
+        if (ps == null) {
+            StringBuilder names = new StringBuilder();
+            for (PrintService s : PrintServiceLookup.lookupPrintServices(null, null)) {
+                names.append("\n - ").append(s.getName());
+            }
+            throw new IllegalStateException("No printer found with a name containing '" + PRINTER_NAME
+                    + "'. Printers on this computer:" + names);
+        }
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         out.write(new byte[]{0x1B, 0x40});               // ESC @  : initialize
         out.write(text.getBytes("CP437"));
         out.write(new byte[]{'\n', '\n', '\n', '\n'});   // feed
-        out.write(new byte[]{0x1D, 0x56, 0x42, 0x00});   // GS V B 0 : cut (kung may cutter)
+        out.write(new byte[]{0x1D, 0x56, 0x42, 0x00});   // GS V B 0 : cut (if the printer has a cutter)
 
         DocPrintJob job = ps.createPrintJob();
         Doc doc = new SimpleDoc(out.toByteArray(), DocFlavor.BYTE_ARRAY.AUTOSENSE, null);
